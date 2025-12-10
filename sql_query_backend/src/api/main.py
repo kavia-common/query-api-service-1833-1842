@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+import json
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,19 +34,15 @@ class QueryRequest(BaseModel):
     )
 
 
-class QueryResult(BaseModel):
-    """Model representing the query result rows."""
-    rows: List[Dict[str, Any]] = Field(
-        default_factory=list,
-        description="Array of row objects returned by the query.",
-        examples=[[{"id": 1, "name": "Alice"}]],
-    )
-
-
 class ResponseModel(BaseModel):
     """Model representing the response payload."""
     sql: str = Field(..., description="The SQL statement that was executed.")
-    result: QueryResult = Field(..., description="Query execution result container.")
+    # Result must be a JSON-stringified representation of the rows array
+    result: str = Field(
+        ...,
+        description="JSON-stringified array of row objects returned by the query.",
+        examples=['[{"id":1,"name":"Alice"}]'],
+    )
 
 
 def _is_select_only(query: str) -> bool:
@@ -113,7 +109,7 @@ def health_check():
     description=(
         "Accepts a SQL query and executes it against the database. "
         "Only SELECT statements are allowed. WITH ... SELECT is permitted. "
-        "The response includes the original SQL and an object containing rows."
+        "The response includes the original SQL and a stringified JSON array of rows."
     ),
     tags=["Query"],
     responses={
@@ -137,7 +133,7 @@ def post_query(payload: QueryRequest) -> ResponseModel:
     Returns
     -------
     ResponseModel
-        The executed SQL and the result rows.
+        The executed SQL and the result rows as a JSON string.
 
     Raises
     ------
@@ -161,5 +157,8 @@ def post_query(payload: QueryRequest) -> ResponseModel:
         # Avoid leaking internal details; present a safe error
         raise HTTPException(status_code=400, detail=f"Query execution failed: {str(exc)}") from exc
 
+    # Serialize rows to JSON string
+    result_str = json.dumps(rows, ensure_ascii=False)
+
     # Shape response exactly as required
-    return ResponseModel(sql=query, result=QueryResult(rows=rows))
+    return ResponseModel(sql=query, result=result_str)

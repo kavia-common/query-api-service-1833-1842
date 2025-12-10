@@ -32,7 +32,7 @@
           "Query"
         ],
         "summary": "Execute a SELECT SQL query",
-        "description": "Accepts a SQL query and executes it against the database. Only SELECT statements are allowed. WITH ... SELECT is permitted. The response includes the original SQL and an object containing rows.",
+        "description": "Accepts a SQL query and executes it against the database. Only SELECT statements are allowed. WITH ... SELECT is permitted. The response includes the original SQL and a stringified JSON array of rows.",
         "operationId": "post_query_query_post",
         "requestBody": {
           "content": {
@@ -108,30 +108,6 @@
         "title": "QueryRequest",
         "description": "Model representing the incoming SQL query request."
       },
-      "QueryResult": {
-        "properties": {
-          "rows": {
-            "items": {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Rows",
-            "description": "Array of row objects returned by the query.",
-            "examples": [
-              [
-                {
-                  "id": 1,
-                  "name": "Alice"
-                }
-              ]
-            ]
-          }
-        },
-        "type": "object",
-        "title": "QueryResult",
-        "description": "Model representing the query result rows."
-      },
       "ResponseModel": {
         "properties": {
           "sql": {
@@ -140,8 +116,12 @@
             "description": "The SQL statement that was executed."
           },
           "result": {
-            "$ref": "#/components/schemas/QueryResult",
-            "description": "Query execution result container."
+            "type": "string",
+            "title": "Result",
+            "description": "JSON-stringified array of row objects returned by the query.",
+            "examples": [
+              "[{\"id\":1,\"name\":\"Alice\"}]"
+            ]
           }
         },
         "type": "object",

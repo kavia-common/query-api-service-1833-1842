@@ -81,7 +81,7 @@ Response format:
 ```
 {
   "sql": "<original SQL>",
-  "result": { "rows": [ { /* row */ }, ... ] }
+  "result": "[{ \"col\": \"value\" }, ...]"  // stringified JSON array of rows
 }
 ```
 
