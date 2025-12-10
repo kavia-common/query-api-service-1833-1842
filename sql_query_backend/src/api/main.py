@@ -4,6 +4,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, constr
 
+from .db import execute_readonly_query
+
 # Create the FastAPI app with metadata for better OpenAPI docs
 app = FastAPI(
     title="SQL Query Backend",
@@ -96,27 +98,6 @@ def _is_select_only(query: str) -> bool:
     return True
 
 
-def execute_query(query: str) -> List[Dict[str, Any]]:
-    """
-    Stub database execution function.
-
-    This will be implemented in the next step to execute the SQL against a real database.
-    For now, it returns an empty list to satisfy the response contract.
-
-    Parameters
-    ----------
-    query : str
-        The SQL SELECT query to be executed.
-
-    Returns
-    -------
-    List[Dict[str, Any]]
-        A list of rows (each row is a dict mapping column names to values).
-    """
-    # TODO: Implement actual database execution in the next step.
-    return []
-
-
 # PUBLIC_INTERFACE
 @app.get("/", summary="Health Check", tags=["System"])
 def health_check():
@@ -173,8 +154,12 @@ def post_query(payload: QueryRequest) -> ResponseModel:
                    "Dangerous tokens (DML/DDL/Comments) are rejected.",
         )
 
-    # Execute (stubbed for now)
-    rows = execute_query(query)
+    # Execute against DB in read-only mode
+    try:
+        rows = execute_readonly_query(query)
+    except Exception as exc:
+        # Avoid leaking internal details; present a safe error
+        raise HTTPException(status_code=400, detail=f"Query execution failed: {str(exc)}") from exc
 
     # Shape response exactly as required
     return ResponseModel(sql=query, result=QueryResult(rows=rows))
