@@ -41,5 +41,7 @@ uvicorn==0.34.0
 uvloop==0.21.0
 watchfiles==1.0.5
 websockets==15.0.1
-# Optional: Install for PostgreSQL support at runtime
+
+# Optional dependency:
+# For PostgreSQL support, uncomment the line below or install it manually:
 # psycopg2-binary==2.9.10
