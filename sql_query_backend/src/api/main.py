@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, constr
 
-from .db import execute_readonly_query
+from .db import execute_query
 
 # Create the FastAPI app with metadata for better OpenAPI docs
 app = FastAPI(
@@ -156,7 +156,7 @@ def post_query(payload: QueryRequest) -> ResponseModel:
 
     # Execute against DB in read-only mode
     try:
-        rows = execute_readonly_query(query)
+        rows = execute_query(query)
     except Exception as exc:
         # Avoid leaking internal details; present a safe error
         raise HTTPException(status_code=400, detail=f"Query execution failed: {str(exc)}") from exc

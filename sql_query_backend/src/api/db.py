@@ -17,6 +17,8 @@ except Exception:
 
 DB_URL_ENV = "DB_URL"
 DB_CONN_TXT = "db_connection.txt"
+# Optional statement timeout in milliseconds for PostgreSQL, to prevent long-running queries
+DB_STATEMENT_TIMEOUT_MS_ENV = "DB_STATEMENT_TIMEOUT_MS"
 
 
 @dataclass
@@ -103,18 +105,23 @@ def _pg_connection_ro(dsn: str):
 
     - Connects using psycopg2 (if available)
     - Sets default transaction to read-only
+    - Optionally enforces a per-transaction statement_timeout via env DB_STATEMENT_TIMEOUT_MS
     """
     if not _HAS_PSYCOPG2:
         raise RuntimeError("psycopg2-binary is not installed, cannot connect to PostgreSQL.")
-    conn = psycopg2.connect(dsn)
+    conn = psycopg2.connect(dsn)  # type: ignore
     try:
-        # Ensure read-only on the session level
-        # autocommit False -> we will manage transactions; set read-only at tx level
-        conn.autocommit = False
+        conn.autocommit = False  # manage transactions explicitly
         with conn.cursor() as cur:
+            # Enforce read-only semantics for the session
             cur.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
+            # Optional statement timeout in milliseconds (scoped to this session/connection)
+            timeout_ms = os.getenv(DB_STATEMENT_TIMEOUT_MS_ENV)
+            if timeout_ms and timeout_ms.isdigit():
+                cur.execute(f"SET LOCAL statement_timeout = {int(timeout_ms)}")
         yield conn
-        conn.rollback()  # Ensure no persistent changes (should be none, but rollback to clear tx)
+        # Ensure we never persist anything
+        conn.rollback()
     finally:
         conn.close()
 
@@ -132,7 +139,6 @@ def _sqlite_connection_ro(url: str):
     For memory DB, using read-only doesn't make sense; we still open a memory DB which is isolated per connection.
     """
     # Extract path from sqlite URL
-    # sqlite:///:memory: or sqlite:///path/to.db
     path = url[len("sqlite://"):]
     # path now is like "/:memory:" or "///path.db" depending on format
     if path.startswith("///"):
@@ -152,11 +158,9 @@ def _sqlite_connection_ro(url: str):
             conn = sqlite3.connect(uri, uri=True)
 
     try:
-        # Make rows dict-compatible
-        conn.row_factory = sqlite3.Row
-        # Enforce read-only via PRAGMA when possible; SQLite read-only is enforced by mode=ro.
+        conn.row_factory = sqlite3.Row  # rows as mappings
         yield conn
-        conn.rollback()  # clear any active transaction
+        conn.rollback()  # clear any active tx (no-op for read-only)
     finally:
         conn.close()
 
@@ -169,12 +173,10 @@ def _fetch_rows(cursor, description) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for rec in cursor.fetchall():
         if isinstance(rec, sqlite3.Row):
-            # sqlite Row supports mapping
             rows.append({k: rec[k] for k in rec.keys()})
         elif isinstance(rec, dict):
             rows.append(rec)
         else:
-            # tuple-like rows
             rows.append({col_names[i]: rec[i] for i in range(len(col_names))})
     return rows
 
@@ -182,14 +184,16 @@ def _fetch_rows(cursor, description) -> List[Dict[str, Any]]:
 def _pg_execute_ro(conn, sql: str) -> List[Dict[str, Any]]:
     """
     Execute a single SELECT statement in read-only mode on PostgreSQL and return rows as list of dicts.
+    Enforces a transaction that is explicitly READ ONLY and applies optional statement_timeout again at tx level.
     """
-    # Use DictCursor for convenience
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:  # type: ignore
-        # Start a read-only tx (session set earlier; ensure again at tx level)
+        # Start a read-only transaction explicitly and apply timeout locally to the tx
         cur.execute("BEGIN READ ONLY")
+        timeout_ms = os.getenv(DB_STATEMENT_TIMEOUT_MS_ENV)
+        if timeout_ms and timeout_ms.isdigit():
+            cur.execute(f"SET LOCAL statement_timeout = {int(timeout_ms)}")
         cur.execute(sql)
         rows = cur.fetchall()
-        # Convert RealDictRow to plain dict
         return [dict(r) for r in rows]
 
 
@@ -199,7 +203,6 @@ def _sqlite_execute_ro(conn: sqlite3.Connection, sql: str) -> List[Dict[str, Any
     """
     cur = conn.cursor()
     try:
-        # SQLite auto-begins a transaction when a write occurs; our connection is opened in read-only mode
         cur.execute(sql)
         return _fetch_rows(cur, cur.description)
     finally:
@@ -244,3 +247,14 @@ def execute_readonly_query(sql: str) -> List[Dict[str, Any]]:
             return _sqlite_execute_ro(conn, sql)
 
     raise RuntimeError(f"Unsupported DB scheme: {parsed.scheme}")
+
+
+# PUBLIC_INTERFACE
+def execute_query(sql: str) -> List[Dict[str, Any]]:
+    """
+    Convenience public wrapper identical to execute_readonly_query for naming clarity.
+
+    This alias exists so external modules can import execute_query while guaranteeing
+    read-only enforcement across Postgres and SQLite backends.
+    """
+    return execute_readonly_query(sql)
